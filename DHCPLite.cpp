@@ -346,13 +346,17 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 		(0 != dwMinAddr) && 
 		(0 != dwMaxAddr)
 		);
+	// pbData直接转换为DHCPMessage
 	const DHCPMessage* const pdhcpmRequest = (DHCPMessage*)pbData;
-	if ((((sizeof(*pdhcpmRequest) + sizeof(pbDHCPMagicCookie)) <= iDataSize) &&  // Take into account mandatory DHCP magic cookie values in options array (RFC 2131 section 3)
-		(op_BOOTREQUEST == pdhcpmRequest->op) &&
-		// (pdhcpmRequest->htype) && // Could also validate htype
-		(0 == memcmp(pbDHCPMagicCookie, pdhcpmRequest->options, sizeof(pbDHCPMagicCookie))))
-		)
-	{
+	//字节不匹配
+	if (((sizeof(DHCPMessage) + sizeof(pbDHCPMagicCookie)) > iDataSize))
+		goto errMsg;
+	//opcode不匹配
+	if (pdhcpmRequest->op != op_BOOTREQUEST)
+		goto errMsg;
+	//MagicCookie不匹配,options是DHCPMessage尾部
+	if (!memcmp(pbDHCPMagicCookie, pdhcpmRequest->options, sizeof(pbDHCPMagicCookie)))
+		goto errMsg;
 		const BYTE* const pbOptions = pdhcpmRequest->options + sizeof(pbDHCPMagicCookie);
 		const int iOptionsSize = iDataSize - (int)sizeof(*pdhcpmRequest) - (int)sizeof(pbDHCPMagicCookie);
 		DHCPMessageTypes dhcpmtMessageType;
@@ -668,16 +672,10 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 			{
 				// Ignore attempts by the DHCP server to obtain a DHCP address (possible if its current address was obtained by auto-IP) because this would invalidate dwServerAddr
 			}
-		}
-		else
-		{
-			OUTPUT_WARNING((TEXT("Invalid DHCP message (invalid or missing DHCP message type).")));
-		}
+
 	}
-	else
-	{
-		OUTPUT_WARNING((TEXT("Invalid DHCP message (failed initial checks).")));
-	}
+errMsg:
+	OUTPUT_WARNING((TEXT("Invalid DHCP message (failed initial checks).")));
 }
 
 bool ReadDHCPClientRequests(const SOCKET sServerSocket, const char* const pcsServerHostName, VectorAddressInUseInformation* const pvAddressesInUse, const DWORD dwServerAddr, const DWORD dwMask, const DWORD dwMinAddr, const DWORD dwMaxAddr)
