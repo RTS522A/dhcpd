@@ -335,9 +335,19 @@ bool AddressInUseInformationClientIdentifierFilter(const AddressInUseInformation
 
 void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsServerHostName, const BYTE* const pbData, const int iDataSize, VectorAddressInUseInformation* const pvAddressesInUse, const DWORD dwServerAddr, const DWORD dwMask, const DWORD dwMinAddr, const DWORD dwMaxAddr)
 {
-	ASSERT((INVALID_SOCKET != sServerSocket) && (0 != pcsServerHostName) && ((0 == iDataSize) || (0 != pbData)) && (0 != pvAddressesInUse) && (0 != dwServerAddr) && (0 != dwMask) && (0iDataSize != dwMinAddr) && (0 != dwMaxAddr));
+	ASSERT(
+		(INVALID_SOCKET != sServerSocket) &&
+		(0 != pcsServerHostName) &&
+		((0 == iDataSize) ||
+		(0 != pbData)) &&
+		(0 != pvAddressesInUse) &&
+		(0 != dwServerAddr) &&
+		(0 != dwMask) &&
+		(0 != dwMinAddr) && 
+		(0 != dwMaxAddr)
+		);
 	const DHCPMessage* const pdhcpmRequest = (DHCPMessage*)pbData;
-	if ((((sizeof(*pdhcpmRequest) + sizeof(pbDHCPMagicCookie)) <= ) &&  // Take into account mandatory DHCP magic cookie values in options array (RFC 2131 section 3)
+	if ((((sizeof(*pdhcpmRequest) + sizeof(pbDHCPMagicCookie)) <= iDataSize) &&  // Take into account mandatory DHCP magic cookie values in options array (RFC 2131 section 3)
 		(op_BOOTREQUEST == pdhcpmRequest->op) &&
 		// (pdhcpmRequest->htype) && // Could also validate htype
 		(0 == memcmp(pbDHCPMagicCookie, pdhcpmRequest->options, sizeof(pbDHCPMagicCookie))))
