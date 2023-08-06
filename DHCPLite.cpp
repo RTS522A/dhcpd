@@ -224,43 +224,37 @@ bool GetIPAddressInformation(DWORD* const pdwAddr, DWORD* const pdwMask, DWORD* 
 bool InitializeDHCPServer(SOCKET* const psServerSocket, const DWORD dwServerAddr, char* const pcsServerHostName, const size_t stServerHostNameLength)
 {
 	ASSERT((0 != psServerSocket) && (0 != dwServerAddr) && (0 != pcsServerHostName) && (1 <= stServerHostNameLength));
-	bool bSuccess = false;
 	// Determine server hostname
-	if (0 != gethostname(pcsServerHostName, (int)stServerHostNameLength))
-	{
-		pcsServerHostName[0] = '\0';
-	}
+	//解析主机名
+	pcsServerHostName[0] = '\0';
+	gethostname(pcsServerHostName, (int)stServerHostNameLength);
+
 	// Open socket and set broadcast option on it
+
+	// 使用IP数据报
 	*psServerSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-	if (INVALID_SOCKET != *psServerSocket)
-	{
-		SOCKADDR_IN saServerAddress;
-		saServerAddress.sin_family = AF_INET;
-		saServerAddress.sin_addr.s_addr = dwServerAddr;  // Already in network byte order
-		saServerAddress.sin_port = htons((u_short)DHCP_SERVER_PORT);
-		const int iServerAddressSize = sizeof(saServerAddress);
-		if (SOCKET_ERROR != bind(*psServerSocket, (SOCKADDR*)(&saServerAddress), iServerAddressSize))
-		{
-			int iBroadcastOption = TRUE;
-			if (0 == setsockopt(*psServerSocket, SOL_SOCKET, SO_BROADCAST, (char*)(&iBroadcastOption), sizeof(iBroadcastOption)))
-			{
-				bSuccess = true;
-			}
-			else
-			{
-				OUTPUT_ERROR((TEXT("Unable to set socket options.")));
-			}
-		}
-		else
-		{
-			OUTPUT_ERROR((TEXT("Unable to bind to server socket (port %d)."), DHCP_SERVER_PORT));
-		}
-	}
-	else
-	{
+	if (INVALID_SOCKET == *psServerSocket) {
 		OUTPUT_ERROR((TEXT("Unable to open server socket (port %d)."), DHCP_SERVER_PORT));
+		return false;
 	}
-	return bSuccess;
+	// 确定服务器主机IP、端口
+	SOCKADDR_IN saServerAddress;
+	saServerAddress.sin_family = AF_INET;
+	saServerAddress.sin_addr.s_addr = dwServerAddr;  // Already in network byte order
+	saServerAddress.sin_port = htons((u_short)DHCP_SERVER_PORT);
+	const int iServerAddressSize = sizeof(saServerAddress);
+	if (SOCKET_ERROR == bind(*psServerSocket, (SOCKADDR*)(&saServerAddress), iServerAddressSize))
+	{
+		OUTPUT_ERROR((TEXT("Unable to bind to server socket (port %d)."), DHCP_SERVER_PORT));
+		return false;
+	}
+	char iBroadcastOption = TRUE;
+	if (!setsockopt(*psServerSocket, SOL_SOCKET, SO_BROADCAST, &iBroadcastOption, sizeof(iBroadcastOption)))
+		return true;
+	else
+		OUTPUT_ERROR((TEXT("Unable to set socket options.")));
+
+	return false;
 }
 
 bool FindOptionData(const BYTE bOption, const BYTE* const pbOptions, const int iOptionsSize, const BYTE** const ppbOptionData, unsigned int* const piOptionDataSize)
@@ -679,47 +673,42 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 bool ReadDHCPClientRequests(const SOCKET sServerSocket, const char* const pcsServerHostName, VectorAddressInUseInformation* const pvAddressesInUse, const DWORD dwServerAddr, const DWORD dwMask, const DWORD dwMinAddr, const DWORD dwMaxAddr)
 {
 	ASSERT((INVALID_SOCKET != sServerSocket) && (0 != pcsServerHostName) && (0 != pvAddressesInUse) && (0 != dwServerAddr) && (0 != dwMask) && (0 != dwMinAddr) && (0 != dwMaxAddr));
-	bool bSuccess = false;
-	BYTE* const pbReadBuffer = (BYTE*)LocalAlloc(LMEM_FIXED, MAX_UDP_MESSAGE_SIZE);
-	if (0 != pbReadBuffer)
+	static BYTE pbReadBuffer[MAX_UDP_MESSAGE_SIZE];
+
+	if (!pbReadBuffer) {
+		OUTPUT_ERROR((TEXT("Unable to allocate memory for client datagram read buffer.")));
+		return false;
+	}
+
+	int iLastError = 0;
+	while (WSAENOTSOCK != iLastError)
 	{
-		bSuccess = true;
-		int iLastError = 0;
-		ASSERT(WSAENOTSOCK != iLastError);
-		while (WSAENOTSOCK != iLastError)
+		SOCKADDR_IN saClientAddress;
+		int iClientAddressSize = sizeof(saClientAddress);
+		const int iBytesReceived = recvfrom(sServerSocket, (char*)pbReadBuffer, MAX_UDP_MESSAGE_SIZE, 0, (SOCKADDR*)(&saClientAddress), &iClientAddressSize);
+		if (SOCKET_ERROR != iBytesReceived)
 		{
-			SOCKADDR_IN saClientAddress;
-			int iClientAddressSize = sizeof(saClientAddress);
-			const int iBytesReceived = recvfrom(sServerSocket, (char*)pbReadBuffer, MAX_UDP_MESSAGE_SIZE, 0, (SOCKADDR*)(&saClientAddress), &iClientAddressSize);
-			if (SOCKET_ERROR != iBytesReceived)
+			// ASSERT(DHCP_CLIENT_PORT == ntohs(saClientAddress.sin_port));  // Not always the case
+			ProcessDHCPClientRequest(sServerSocket, pcsServerHostName, pbReadBuffer, iBytesReceived, pvAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr);
+		}
+		else
+		{
+			iLastError = WSAGetLastError();
+			switch (iLastError)
 			{
-				// ASSERT(DHCP_CLIENT_PORT == ntohs(saClientAddress.sin_port));  // Not always the case
-				ProcessDHCPClientRequest(sServerSocket, pcsServerHostName, pbReadBuffer, iBytesReceived, pvAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr);
-			}
-			else
-			{
-				iLastError = WSAGetLastError();
-				if (WSAENOTSOCK == iLastError)
-				{
-					OUTPUT((TEXT("Stopping server request handler.")));
-				}
-				else if (WSAEINTR == iLastError)
-				{
-					OUTPUT((TEXT("Socket operation was cancelled.")));
-				}
-				else
-				{
-					OUTPUT_ERROR((TEXT("Call to recvfrom returned error %d."), iLastError));
-				}
+			case WSAENOTSOCK:
+				OUTPUT((TEXT("Stopping server request handler.")));
+				break;
+			case WSAEINTR:
+				OUTPUT((TEXT("Socket operation was cancelled.")));
+				break;
+			default:
+				OUTPUT_ERROR((TEXT("Call to recvfrom returned error %d."), iLastError));
+				break;
 			}
 		}
-		VERIFY(0 == LocalFree(pbReadBuffer));
 	}
-	else
-	{
-		OUTPUT_ERROR((TEXT("Unable to allocate memory for client datagram read buffer.")));
-	}
-	return bSuccess;
+	return true;
 }
 
 SOCKET sServerSocket = INVALID_SOCKET;  // Global to allow ConsoleCtrlHandlerRoutine access to it
@@ -746,70 +735,86 @@ int main(int /*argc*/, char** /*argv*/)
 	OUTPUT((TEXT("2016-04-02")));
 	OUTPUT((TEXT("Copyright (c) 2001-2016 by David Anson (http://dlaa.me/)")));
 	OUTPUT((TEXT("")));
-	if (SetConsoleCtrlHandler(ConsoleCtrlHandlerRoutine, TRUE))
-	{
-		DWORD dwServerAddr;
-		DWORD dwMask;
-		DWORD dwMinAddr;
-		DWORD dwMaxAddr;
-		if (GetIPAddressInformation(&dwServerAddr, &dwMask, &dwMinAddr, &dwMaxAddr))
-		{
-			ASSERT((DWValuetoIP(dwMinAddr) <= DWValuetoIP(dwServerAddr)) && (DWValuetoIP(dwServerAddr) <= DWValuetoIP(dwMaxAddr)));
-			VectorAddressInUseInformation vAddressesInUse;
-			AddressInUseInformation aiuiServerAddress;
-			aiuiServerAddress.dwAddrValue = DWIPtoValue(dwServerAddr);
-			aiuiServerAddress.pbClientIdentifier = 0;  // Server entry is only entry without a client ID
-			aiuiServerAddress.dwClientIdentifierSize = 0;
-			if (PushBack(&vAddressesInUse, &aiuiServerAddress))
-			{
-				WSADATA wsaData;
-				if (0 == WSAStartup(MAKEWORD(1, 1), &wsaData))
-				{
-					OUTPUT((TEXT("")));
-					OUTPUT((TEXT("Server is running...  (Press Ctrl+C to shutdown.)")));
-					OUTPUT((TEXT("")));
-					char pcsServerHostName[MAX_HOSTNAME_LENGTH];
-					if (InitializeDHCPServer(&sServerSocket, dwServerAddr, pcsServerHostName, ARRAY_LENGTH(pcsServerHostName)))
-					{
-						VERIFY(ReadDHCPClientRequests(sServerSocket, pcsServerHostName, &vAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr));
-						if (INVALID_SOCKET != sServerSocket)
-						{
-							VERIFY(0 == closesocket(sServerSocket));
-							sServerSocket = INVALID_SOCKET;
-						}
-					}
-					else
-					{
-						// OUTPUT_ERROR called by InitializeDHCPServer
-					}
-					VERIFY(0 == WSACleanup());
-				}
-				else
-				{
-					OUTPUT_ERROR((TEXT("Unable to initialize WinSock.")));
-				}
-			}
-			else
-			{
-				OUTPUT_ERROR((TEXT("Insufficient memory to add server address.")));
-			}
-			for (size_t i = 0; i < vAddressesInUse.size(); i++)
-			{
-				aiuiServerAddress = vAddressesInUse.at(i);
-				if (0 != aiuiServerAddress.pbClientIdentifier)
-				{
-					VERIFY(0 == LocalFree(aiuiServerAddress.pbClientIdentifier));
-				}
-			}
-		}
-		else
-		{
-			// OUTPUT_ERROR called by GetIPAddressInformation
-		}
-	}
-	else
-	{
+	/*
+	* ConsoleCtrlHandlerRoutine 捕捉Ctrl-C信号，退出程序
+	*/
+	if (!SetConsoleCtrlHandler(ConsoleCtrlHandlerRoutine, TRUE)) {
 		OUTPUT_ERROR((TEXT("Unable to set Ctrl-C handler.")));
+		return -1;
+	}
+
+	DWORD dwServerAddr;
+	DWORD dwMask;
+	DWORD dwMinAddr;
+	DWORD dwMaxAddr;
+	/*
+	* GetIPAddressInformation 获取本机IP、子网掩码、DHCP作用域
+	*/
+	if (!GetIPAddressInformation(&dwServerAddr, &dwMask, &dwMinAddr, &dwMaxAddr))
+		return -1;
+
+	printf("serverAddr = %s\n", inet_ntoa(*(in_addr*)&dwServerAddr));
+	printf("dwMask = %s\n", inet_ntoa(*(in_addr*)&dwMask));
+	printf("dwMinAddr = %s\n", inet_ntoa(*(in_addr*)&dwMinAddr));
+	printf("dwMaxAddr = %s\n", inet_ntoa(*(in_addr*)&dwMaxAddr));
+	
+	ASSERT((DWValuetoIP(dwMinAddr) <= DWValuetoIP(dwServerAddr)) && (DWValuetoIP(dwServerAddr) <= DWValuetoIP(dwMaxAddr)));
+	// VectorAddressInUseInformation 接入用户地址-标识对
+	VectorAddressInUseInformation vAddressesInUse;
+	AddressInUseInformation aiuiServerAddress;
+	// DWIPtoValue 大小端序转换
+	aiuiServerAddress.dwAddrValue = DWIPtoValue(dwServerAddr);
+	aiuiServerAddress.pbClientIdentifier = 0;  // Server entry is only entry without a client ID
+	aiuiServerAddress.dwClientIdentifierSize = 0;
+
+	//PushBack封装了vector::push_back，把异常转换成条件语句
+	if (!PushBack(&vAddressesInUse, &aiuiServerAddress)) {
+		OUTPUT_ERROR((TEXT("Insufficient memory to add server address.")));
+		return -1;
+	}
+
+	WSADATA wsaData;
+	if (WSAStartup(MAKEWORD(1, 1), &wsaData)) {
+		OUTPUT_ERROR((TEXT("Unable to initialize WinSock.")));
+		return -1;
+	}
+
+	OUTPUT((TEXT("")));
+	OUTPUT((TEXT("Server is running...  (Press Ctrl+C to shutdown.)")));
+	OUTPUT((TEXT("")));
+
+	char pcsServerHostName[MAX_HOSTNAME_LENGTH];
+	/**
+	 * @brief 初始化socket为IP数据报，并设置option为广播（setsockopt）
+	 * @param sServerSocket 用以accept的socket
+	 * @param dwServerAddr 主机IP
+	 * @param pcsServerHostName buffer
+	 * @param MAX_HOSTNAME_LENGTH bufferSize
+	 * @return 
+	 */
+	if (!InitializeDHCPServer(&sServerSocket, dwServerAddr, pcsServerHostName, MAX_HOSTNAME_LENGTH))
+		return -1;
+
+	// 主任务循环
+	VERIFY(ReadDHCPClientRequests(sServerSocket, pcsServerHostName, &vAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr));
+	
+	// 在sigint之后的尾处理
+	if (INVALID_SOCKET != sServerSocket)
+	{
+		VERIFY(0 == closesocket(sServerSocket));
+		sServerSocket = INVALID_SOCKET;
+	}
+
+	VERIFY(0 == WSACleanup());
+
+	for (size_t i = 0; i < vAddressesInUse.size(); i++)
+	{
+		aiuiServerAddress = vAddressesInUse.at(i);
+		if (0 != aiuiServerAddress.pbClientIdentifier)
+		{
+			// LocalAlloc/LocalFree相当于malloc/free
+			VERIFY(0 == LocalFree(aiuiServerAddress.pbClientIdentifier));
+		}
 	}
 	return 0;
 }
