@@ -335,9 +335,9 @@ bool AddressInUseInformationClientIdentifierFilter(const AddressInUseInformation
 
 void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsServerHostName, const BYTE* const pbData, const int iDataSize, VectorAddressInUseInformation* const pvAddressesInUse, const DWORD dwServerAddr, const DWORD dwMask, const DWORD dwMinAddr, const DWORD dwMaxAddr)
 {
-	ASSERT((INVALID_SOCKET != sServerSocket) && (0 != pcsServerHostName) && ((0 == iDataSize) || (0 != pbData)) && (0 != pvAddressesInUse) && (0 != dwServerAddr) && (0 != dwMask) && (0 != dwMinAddr) && (0 != dwMaxAddr));
+	ASSERT((INVALID_SOCKET != sServerSocket) && (0 != pcsServerHostName) && ((0 == iDataSize) || (0 != pbData)) && (0 != pvAddressesInUse) && (0 != dwServerAddr) && (0 != dwMask) && (0iDataSize != dwMinAddr) && (0 != dwMaxAddr));
 	const DHCPMessage* const pdhcpmRequest = (DHCPMessage*)pbData;
-	if ((((sizeof(*pdhcpmRequest) + sizeof(pbDHCPMagicCookie)) <= iDataSize) &&  // Take into account mandatory DHCP magic cookie values in options array (RFC 2131 section 3)
+	if ((((sizeof(*pdhcpmRequest) + sizeof(pbDHCPMagicCookie)) <= ) &&  // Take into account mandatory DHCP magic cookie values in options array (RFC 2131 section 3)
 		(op_BOOTREQUEST == pdhcpmRequest->op) &&
 		// (pdhcpmRequest->htype) && // Could also validate htype
 		(0 == memcmp(pbDHCPMagicCookie, pdhcpmRequest->options, sizeof(pbDHCPMagicCookie))))
@@ -680,33 +680,26 @@ bool ReadDHCPClientRequests(const SOCKET sServerSocket, const char* const pcsSer
 		return false;
 	}
 
-	int iLastError = 0;
-	while (WSAENOTSOCK != iLastError)
+	while (true)
 	{
 		SOCKADDR_IN saClientAddress;
 		int iClientAddressSize = sizeof(saClientAddress);
 		const int iBytesReceived = recvfrom(sServerSocket, (char*)pbReadBuffer, MAX_UDP_MESSAGE_SIZE, 0, (SOCKADDR*)(&saClientAddress), &iClientAddressSize);
-		if (SOCKET_ERROR != iBytesReceived)
-		{
-			// ASSERT(DHCP_CLIENT_PORT == ntohs(saClientAddress.sin_port));  // Not always the case
-			ProcessDHCPClientRequest(sServerSocket, pcsServerHostName, pbReadBuffer, iBytesReceived, pvAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr);
-		}
-		else
-		{
-			iLastError = WSAGetLastError();
-			switch (iLastError)
+		if(iBytesReceived == SOCKET_ERROR)
+			switch (WSAGetLastError())
 			{
 			case WSAENOTSOCK:
 				OUTPUT((TEXT("Stopping server request handler.")));
-				break;
+				return true;
 			case WSAEINTR:
 				OUTPUT((TEXT("Socket operation was cancelled.")));
-				break;
+				continue;
 			default:
-				OUTPUT_ERROR((TEXT("Call to recvfrom returned error %d."), iLastError));
-				break;
+				OUTPUT_ERROR((TEXT("Call to recvfrom returned error")));
+				continue;
 			}
-		}
+
+		ProcessDHCPClientRequest(sServerSocket, pcsServerHostName, pbReadBuffer, iBytesReceived, pvAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr);
 	}
 	return true;
 }
@@ -786,7 +779,7 @@ int main(int /*argc*/, char** /*argv*/)
 	char pcsServerHostName[MAX_HOSTNAME_LENGTH];
 	/**
 	 * @brief 初始化socket为IP数据报，并设置option为广播（setsockopt）
-	 * @param sServerSocket 用以accept的socket
+	 * @param sServerSocket 用以监听广播的socket
 	 * @param dwServerAddr 主机IP
 	 * @param pcsServerHostName buffer
 	 * @param MAX_HOSTNAME_LENGTH bufferSize
@@ -796,6 +789,12 @@ int main(int /*argc*/, char** /*argv*/)
 		return -1;
 
 	// 主任务循环
+	/**
+	 * @brief 函数体循环接受广播socket、ProcessDHCPClientRequest并对其错误进行处理
+	 * \param 
+	 * \param 
+	 * \return 
+	 */
 	VERIFY(ReadDHCPClientRequests(sServerSocket, pcsServerHostName, &vAddressesInUse, dwServerAddr, dwMask, dwMinAddr, dwMaxAddr));
 	
 	// 在sigint之后的尾处理

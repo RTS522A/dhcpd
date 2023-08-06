@@ -1,5 +1,0 @@
-﻿cl : 命令行  warning D9035: “Gm”选项已否决，并将在将来的版本中移除
-  DHCPLite.cpp
-E:\SourceCodes\DHCPLite\DHCPLite.cpp(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
-E:\SourceCodes\DHCPLite\DHCPLite.cpp(716,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失
-  DHCPLite.vcxproj -> E:\SourceCodes\DHCPLite\Debug\DHCPLite.exe
