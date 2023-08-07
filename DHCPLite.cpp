@@ -397,6 +397,7 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 	DWORD dwClientPreviousOfferAddr = (DWORD)INADDR_BROADCAST;  // Invalid IP address for later comparison
 	const ClientIdentifierData cid = { pbRequestClientIdentifierData, (DWORD)iRequestClientIdentifierDataSize };
 	//这里有优化空间，通过键值对和数组查找
+	//应该有多组表（由DHCP管理的IP，不由DHCP管理的IP），并且要对冲突进行检测
 	const int iIndex = FindIndexOf(pvAddressesInUse, AddressInUseInformationClientIdentifierFilter, &cid);
 	if (-1 != iIndex)
 	{
@@ -450,6 +451,7 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 	bool bSendDHCPMessage = false;
 	switch (dhcpmtMessageType)
 	{
+	//为请求者找到一个可用的IP
 	case DHCPMessageType_DISCOVER:
 	{
 		// RFC 2131 section 4.3.1
@@ -471,8 +473,9 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 		}
 		// Search for an available address if necessary
 		const DWORD dwInitialOfferAddrValue = dwOfferAddrValue;
-		bool bOfferedInitialValue = false;
-		while (!bOfferAddrValueValid && !(bOfferedInitialValue && (dwInitialOfferAddrValue == dwOfferAddrValue)))  // Detect address exhaustion
+		bool bOfferedInitialValue = false;//遍历一圈用的
+		//遍历一圈，没有找到就跳出
+		while (!(bOfferedInitialValue && (dwInitialOfferAddrValue == dwOfferAddrValue)))  // Detect address exhaustion
 		{
 			if (dwMaxAddrValue < dwOfferAddrValue)
 			{
@@ -485,7 +488,10 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 			{
 				dwOfferAddrValue++;
 			}
+			else
+				break;
 		}
+		//发送dwOfferAddrValue
 		if (bOfferAddrValueValid)
 		{
 			dwServerLastOfferAddrValue = dwOfferAddrValue;
@@ -526,6 +532,7 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 		}
 	}
 	break;
+	// 接受或拒绝请求，建立并维护IP-MAC映射
 	case DHCPMessageType_REQUEST:
 	{
 		// RFC 2131 section 4.3.2
@@ -573,6 +580,7 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 				}
 				else
 				{
+					// 之前没有过请求（可能是静态IP，或者DHCP服务器重启），需要将这个IP纳入DHCP中维护
 					// Haven't seen this client before or requested IP address is invalid
 					pdhcpsoServerOptions->pbMessageType[2] = DHCPMessageType_NAK;
 					// Will clear invalid options and prepare to send message below
@@ -605,11 +613,15 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 		}
 	}
 	break;
+	// 维护IP-MAC映射，及时删除映射或者临时禁用IP分配
 	case DHCPMessageType_DECLINE:
 		// Fall-through
+		// 获取option 50并记录为static占用
+	// 维护IP-MAC映射，删除映射
 	case DHCPMessageType_RELEASE:
 		// UNSUPPORTED: Mark address as unused
 		break;
+	// 废止
 	case DHCPMessageType_INFORM:
 		// Unsupported DHCP message type - fail silently
 		break;
