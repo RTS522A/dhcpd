@@ -343,6 +343,7 @@ bool AddressInUseInformationClientIdentifierFilter(const AddressInUseInformation
 
 void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsServerHostName, const BYTE* const pbData, const int iDataSize, VectorAddressInUseInformation* const pvAddressesInUse, const DWORD dwServerAddr, const DWORD dwMask, const DWORD dwMinAddr, const DWORD dwMaxAddr)
 {
+	std::string pcsClientHostName;
 	ASSERT(
 		(INVALID_SOCKET != sServerSocket) &&
 		(0 != pcsServerHostName) &&
@@ -374,7 +375,6 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 	}
 	// Determine client host name
 	const char* pbRequestHostNameData;
-	std::string pcsClientHostName;
 	unsigned int iRequestHostNameDataSize;
 	if (FindOptionData(option_HOSTNAME, pbOptions, iOptionsSize, (const BYTE**)&pbRequestHostNameData, &iRequestHostNameDataSize))
 		pcsClientHostName = std::string(pbRequestHostNameData, iRequestHostNameDataSize);
