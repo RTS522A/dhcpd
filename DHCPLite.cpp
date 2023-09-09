@@ -373,7 +373,7 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 
 	// Determine client host name
 	const char* pbRequestHostNameData;
-	std::string pcsClientHostName;
+	std::string pcsClientHostName(\0);
 	unsigned int iRequestHostNameDataSize;
 	if (FindOptionData(option_HOSTNAME, pbOptions, iOptionsSize, (const BYTE**)&pbRequestHostNameData, &iRequestHostNameDataSize))
 		pcsClientHostName = std::string(pbRequestHostNameData, iRequestHostNameDataSize);
