@@ -371,7 +371,9 @@ void ProcessDHCPClientRequest(const SOCKET sServerSocket, const char* const pcsS
 	if (!GetDHCPMessageType(pbOptions, iOptionsSize, &dhcpmtMessageType))
 		goto errMsg;
 	// Determine client host name
-	std::string pcsClientHostName;
+	//std::string pcsClientHostName;
+	char pcsClientHostName[MAX_HOSTNAME_LENGTH];
+	pcsClientHostName[0] = '\0';
 	const char* pbRequestHostNameData;
 	unsigned int iRequestHostNameDataSize;
 	if (FindOptionData(option_HOSTNAME, pbOptions, iOptionsSize, (const BYTE**)&pbRequestHostNameData, &iRequestHostNameDataSize))
